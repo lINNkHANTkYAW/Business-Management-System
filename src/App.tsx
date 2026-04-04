@@ -8,11 +8,10 @@ import RealEstate from './pages/RealEstate';
 import TaxiHijet from './pages/TaxiHijet';
 import Reminders from './pages/Reminders';
 import Reporting from './pages/Reporting';
+import Settings from './pages/Settings';
 import Login from './pages/Login';
 
 // Placeholder pages
-const Settings = () => <div className="text-2xl font-bold">ဆက်တင်များ (Coming Soon)</div>;
-
 export default function App() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
