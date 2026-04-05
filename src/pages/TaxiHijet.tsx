@@ -14,6 +14,8 @@ import { supabase } from '@/lib/supabase';
 import { BURMESE_LABELS, formatCurrency, cn } from '@/lib/utils';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
+import { uploadFile } from '@/lib/storage';
+import { ExternalLink } from 'lucide-react';
 
 export default function TaxiHijet() {
   const [activeTab, setActiveTab] = useState<'vehicles' | 'drivers' | 'fees' | 'maintenance'>('vehicles');
@@ -21,6 +23,7 @@ export default function TaxiHijet() {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingItem, setEditingItem] = useState<any>(null);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
 
@@ -69,13 +72,17 @@ export default function TaxiHijet() {
       name: formData.get('name'),
       model: formData.get('model'),
       license_expiry: formData.get('license_expiry') || null,
-      status: 'active',
+      status: editingItem ? editingItem.status : 'active',
     };
 
-    const { error } = await supabase.from('th_vehicles').insert([newVehicle]);
-    if (error) alert('Error adding vehicle: ' + error.message);
+    const { error } = editingItem 
+      ? await supabase.from('th_vehicles').update(newVehicle).eq('id', editingItem.id)
+      : await supabase.from('th_vehicles').insert([newVehicle]);
+
+    if (error) alert('Error: ' + error.message);
     else {
       setIsModalOpen(false);
+      setEditingItem(null);
       fetchData();
     }
     setIsSubmitting(false);
@@ -93,10 +100,14 @@ export default function TaxiHijet() {
       address: formData.get('address'),
     };
 
-    const { error } = await supabase.from('th_drivers').insert([newDriver]);
-    if (error) alert('Error adding driver: ' + error.message);
+    const { error } = editingItem
+      ? await supabase.from('th_drivers').update(newDriver).eq('id', editingItem.id)
+      : await supabase.from('th_drivers').insert([newDriver]);
+
+    if (error) alert('Error: ' + error.message);
     else {
       setIsModalOpen(false);
+      setEditingItem(null);
       fetchData();
     }
     setIsSubmitting(false);
@@ -106,23 +117,40 @@ export default function TaxiHijet() {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const newFee = {
-      vehicle_id: formData.get('vehicle_id'),
-      driver_id: formData.get('driver_id'),
-      amount: Number(formData.get('amount')),
-      payment_date: formData.get('payment_date'),
-      cycle_start: formData.get('cycle_start'),
-      cycle_end: formData.get('cycle_end'),
-      status: 'paid',
-    };
+    const screenshotFile = formData.get('screenshot') as File;
+    let screenshotUrl = null;
 
-    const { error } = await supabase.from('th_fee_payments').insert([newFee]);
-    if (error) alert('Error adding fee payment: ' + error.message);
-    else {
+    try {
+      if (screenshotFile && screenshotFile.size > 0) {
+        const fileName = `${Date.now()}_${screenshotFile.name}`;
+        screenshotUrl = await uploadFile('screenshots', `fees/${fileName}`, screenshotFile);
+      }
+
+      const newFee = {
+        vehicle_id: formData.get('vehicle_id'),
+        driver_id: formData.get('driver_id'),
+        amount: Number(formData.get('amount')),
+        payment_date: formData.get('payment_date'),
+        cycle_start: formData.get('cycle_start'),
+        cycle_end: formData.get('cycle_end'),
+        status: editingItem ? editingItem.status : 'paid',
+        screenshot_url: screenshotUrl || (editingItem ? editingItem.screenshot_url : null),
+      };
+
+      const { error } = editingItem
+        ? await supabase.from('th_fee_payments').update(newFee).eq('id', editingItem.id)
+        : await supabase.from('th_fee_payments').insert([newFee]);
+
+      if (error) throw error;
+
       setIsModalOpen(false);
+      setEditingItem(null);
       fetchData();
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   }
 
   async function handleAddMaintenance(e: React.FormEvent<HTMLFormElement>) {
@@ -142,10 +170,14 @@ export default function TaxiHijet() {
       driver_share: driverShare,
     };
 
-    const { error } = await supabase.from('th_maintenance').insert([newMaintenance]);
-    if (error) alert('Error adding maintenance: ' + error.message);
+    const { error } = editingItem
+      ? await supabase.from('th_maintenance').update(newMaintenance).eq('id', editingItem.id)
+      : await supabase.from('th_maintenance').insert([newMaintenance]);
+
+    if (error) alert('Error: ' + error.message);
     else {
       setIsModalOpen(false);
+      setEditingItem(null);
       fetchData();
     }
     setIsSubmitting(false);
@@ -295,6 +327,19 @@ export default function TaxiHijet() {
                       <td className="px-6 py-4 text-xs">
                         {item.cycle_start} မှ {item.cycle_end}
                       </td>
+                      <td className="px-6 py-4">
+                        {item.screenshot_url ? (
+                          <a 
+                            href={item.screenshot_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-xs"
+                          >
+                            <ExternalLink size={14} />
+                            ကြည့်မည်
+                          </a>
+                        ) : '-'}
+                      </td>
                     </>
                   )}
                   {activeTab === 'maintenance' && (
@@ -310,7 +355,13 @@ export default function TaxiHijet() {
                       <button className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-colors">
                         <Eye size={18} />
                       </button>
-                      <button className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-amber-600 transition-colors">
+                      <button 
+                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-amber-600 transition-colors"
+                        onClick={() => {
+                          setEditingItem(item);
+                          setIsModalOpen(true);
+                        }}
+                      >
                         <Edit size={18} />
                       </button>
                     </div>
@@ -325,35 +376,41 @@ export default function TaxiHijet() {
       {/* Modals */}
       <Modal 
         isOpen={isModalOpen && activeTab === 'vehicles'} 
-        onClose={() => setIsModalOpen(false)}
-        title="ယာဉ်အသစ်ထည့်မည်"
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingItem(null);
+        }}
+        title={editingItem ? "ယာဉ်အချက်အလက်ပြင်မည်" : "ယာဉ်အသစ်ထည့်မည်"}
       >
         <form onSubmit={handleAddVehicle} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">ယာဉ်အမျိုးအစား</label>
-            <select name="type" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none">
+            <select name="type" defaultValue={editingItem?.type} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none">
               <option value="taxi">Taxi</option>
               <option value="hijet">Hijet</option>
             </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">ယာဉ်အမှတ်</label>
-            <input name="car_number" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="YGN 1A-1234" />
+            <input name="car_number" defaultValue={editingItem?.car_number} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="YGN 1A-1234" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">ယာဉ်အမည်</label>
-            <input name="name" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="Toyota Probox" />
+            <input name="name" defaultValue={editingItem?.name} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="Toyota Probox" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">မော်ဒယ်</label>
-            <input name="model" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="2015" />
+            <input name="model" defaultValue={editingItem?.model} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="2015" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">လိုင်စင်သက်တမ်းကုန်ဆုံးရက်</label>
-            <input name="license_expiry" type="date" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" />
+            <input name="license_expiry" type="date" defaultValue={editingItem?.license_expiry} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" />
           </div>
           <div className="flex gap-3 pt-4">
-            <Button type="button" variant="secondary" className="flex-1" onClick={() => setIsModalOpen(false)}>ပယ်ဖျက်မည်</Button>
+            <Button type="button" variant="secondary" className="flex-1" onClick={() => {
+              setIsModalOpen(false);
+              setEditingItem(null);
+            }}>ပယ်ဖျက်မည်</Button>
             <Button type="submit" className="flex-1" loading={isSubmitting}>သိမ်းဆည်းမည်</Button>
           </div>
         </form>
@@ -361,32 +418,38 @@ export default function TaxiHijet() {
 
       <Modal 
         isOpen={isModalOpen && activeTab === 'drivers'} 
-        onClose={() => setIsModalOpen(false)}
-        title="ယာဉ်မောင်းအသစ်ထည့်မည်"
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingItem(null);
+        }}
+        title={editingItem ? "ယာဉ်မောင်းအချက်အလက်ပြင်မည်" : "ယာဉ်မောင်းအသစ်ထည့်မည်"}
       >
         <form onSubmit={handleAddDriver} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">အမည်</label>
-            <input name="name" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="ဦးမောင်" />
+            <input name="name" defaultValue={editingItem?.name} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="ဦးမောင်" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">မှတ်ပုံတင်အမှတ်</label>
-            <input name="nrc" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="၁၂/မဂတ(နိုင်)xxxxxx" />
+            <input name="nrc" defaultValue={editingItem?.nrc} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="၁၂/မဂတ(နိုင်)xxxxxx" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">လိုင်စင်အမှတ်</label>
-            <input name="license_no" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="B/12345/15" />
+            <input name="license_no" defaultValue={editingItem?.license_no} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="B/12345/15" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">ဖုန်းနံပါတ်</label>
-            <input name="phone" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="09xxxxxxxxx" />
+            <input name="phone" defaultValue={editingItem?.phone} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="09xxxxxxxxx" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">နေရပ်လိပ်စာ</label>
-            <textarea name="address" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" rows={2} placeholder="ရန်ကုန်မြို့"></textarea>
+            <textarea name="address" defaultValue={editingItem?.address} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" rows={2} placeholder="ရန်ကုန်မြို့"></textarea>
           </div>
           <div className="flex gap-3 pt-4">
-            <Button type="button" variant="secondary" className="flex-1" onClick={() => setIsModalOpen(false)}>ပယ်ဖျက်မည်</Button>
+            <Button type="button" variant="secondary" className="flex-1" onClick={() => {
+              setIsModalOpen(false);
+              setEditingItem(null);
+            }}>ပယ်ဖျက်မည်</Button>
             <Button type="submit" className="flex-1" loading={isSubmitting}>သိမ်းဆည်းမည်</Button>
           </div>
         </form>
@@ -394,13 +457,16 @@ export default function TaxiHijet() {
 
       <Modal 
         isOpen={isModalOpen && activeTab === 'fees'} 
-        onClose={() => setIsModalOpen(false)}
-        title="ပိုင်ရှင်ကြေးအသစ်ထည့်မည်"
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingItem(null);
+        }}
+        title={editingItem ? "ပိုင်ရှင်ကြေးအချက်အလက်ပြင်မည်" : "ပိုင်ရှင်ကြေးအသစ်ထည့်မည်"}
       >
         <form onSubmit={handleAddFee} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">ယာဉ်ရွေးချယ်ရန်</label>
-            <select name="vehicle_id" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none">
+            <select name="vehicle_id" defaultValue={editingItem?.vehicle_id} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none">
               <option value="">-- ယာဉ်ရွေးပါ --</option>
               {vehicles.map(v => (
                 <option key={v.id} value={v.id}>{v.car_number} ({v.type})</option>
@@ -409,7 +475,7 @@ export default function TaxiHijet() {
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">ယာဉ်မောင်းရွေးချယ်ရန်</label>
-            <select name="driver_id" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none">
+            <select name="driver_id" defaultValue={editingItem?.driver_id} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none">
               <option value="">-- ယာဉ်မောင်းရွေးပါ --</option>
               {drivers.map(d => (
                 <option key={d.id} value={d.id}>{d.name}</option>
@@ -418,24 +484,31 @@ export default function TaxiHijet() {
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">ပမာဏ (ကျပ်)</label>
-            <input name="amount" type="number" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="15000" />
+            <input name="amount" type="number" defaultValue={editingItem?.amount} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="15000" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">ပေးချေသည့်ရက်စွဲ</label>
-            <input name="payment_date" type="date" defaultValue={new Date().toISOString().split('T')[0]} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" />
+            <input name="payment_date" type="date" defaultValue={editingItem?.payment_date || new Date().toISOString().split('T')[0]} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">ငွေလွှဲပြေစာ (Screenshot)</label>
+            <input name="screenshot" type="file" accept="image/*" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">စတင်သည့်ရက်</label>
-              <input name="cycle_start" type="date" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" />
+              <input name="cycle_start" type="date" defaultValue={editingItem?.cycle_start} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">ကုန်ဆုံးသည့်ရက်</label>
-              <input name="cycle_end" type="date" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" />
+              <input name="cycle_end" type="date" defaultValue={editingItem?.cycle_end} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" />
             </div>
           </div>
           <div className="flex gap-3 pt-4">
-            <Button type="button" variant="secondary" className="flex-1" onClick={() => setIsModalOpen(false)}>ပယ်ဖျက်မည်</Button>
+            <Button type="button" variant="secondary" className="flex-1" onClick={() => {
+              setIsModalOpen(false);
+              setEditingItem(null);
+            }}>ပယ်ဖျက်မည်</Button>
             <Button type="submit" className="flex-1" loading={isSubmitting}>သိမ်းဆည်းမည်</Button>
           </div>
         </form>
@@ -443,13 +516,16 @@ export default function TaxiHijet() {
 
       <Modal 
         isOpen={isModalOpen && activeTab === 'maintenance'} 
-        onClose={() => setIsModalOpen(false)}
-        title="ပြုပြင်ထိန်းသိမ်းမှုအသစ်ထည့်မည်"
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingItem(null);
+        }}
+        title={editingItem ? "ပြုပြင်ထိန်းသိမ်းမှုအချက်အလက်ပြင်မည်" : "ပြုပြင်ထိန်းသိမ်းမှုအသစ်ထည့်မည်"}
       >
         <form onSubmit={handleAddMaintenance} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">ယာဉ်ရွေးချယ်ရန်</label>
-            <select name="vehicle_id" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none">
+            <select name="vehicle_id" defaultValue={editingItem?.vehicle_id} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none">
               <option value="">-- ယာဉ်ရွေးပါ --</option>
               {vehicles.map(v => (
                 <option key={v.id} value={v.id}>{v.car_number}</option>
@@ -458,24 +534,27 @@ export default function TaxiHijet() {
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">ရက်စွဲ</label>
-            <input name="date" type="date" defaultValue={new Date().toISOString().split('T')[0]} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" />
+            <input name="date" type="date" defaultValue={editingItem?.date || new Date().toISOString().split('T')[0]} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">ပြုပြင်မှုအမျိုးအစား</label>
-            <input name="type" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="ဥပမာ - အင်ဂျင်ဝိုင်လဲခြင်း" />
+            <input name="type" defaultValue={editingItem?.type} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="ဥပမာ - အင်ဂျင်ဝိုင်လဲခြင်း" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">စုစုပေါင်းကုန်ကျစရိတ်</label>
-              <input name="total_cost" type="number" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="50000" />
+              <input name="total_cost" type="number" defaultValue={editingItem?.total_cost} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="50000" />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">ပိုင်ရှင်ကျခံငွေ</label>
-              <input name="owner_share" type="number" required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="25000" />
+              <input name="owner_share" type="number" defaultValue={editingItem?.owner_share} required className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" placeholder="25000" />
             </div>
           </div>
           <div className="flex gap-3 pt-4">
-            <Button type="button" variant="secondary" className="flex-1" onClick={() => setIsModalOpen(false)}>ပယ်ဖျက်မည်</Button>
+            <Button type="button" variant="secondary" className="flex-1" onClick={() => {
+              setIsModalOpen(false);
+              setEditingItem(null);
+            }}>ပယ်ဖျက်မည်</Button>
             <Button type="submit" className="flex-1" loading={isSubmitting}>သိမ်းဆည်းမည်</Button>
           </div>
         </form>

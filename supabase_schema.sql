@@ -50,6 +50,25 @@ CREATE TABLE re_payments (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
+CREATE TABLE re_deposits (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  contract_id UUID REFERENCES re_contracts(id) ON DELETE CASCADE,
+  amount NUMERIC NOT NULL,
+  payment_date DATE DEFAULT CURRENT_DATE,
+  status TEXT CHECK (status IN ('held', 'refunded')) DEFAULT 'held',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE TABLE re_refunds (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  deposit_id UUID REFERENCES re_deposits(id) ON DELETE CASCADE,
+  amount NUMERIC NOT NULL,
+  refund_date DATE DEFAULT CURRENT_DATE,
+  reason TEXT,
+  screenshot_url TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
 CREATE TABLE re_expense_categories (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   name TEXT NOT NULL UNIQUE
@@ -104,6 +123,7 @@ CREATE TABLE th_fee_payments (
   cycle_start DATE NOT NULL,
   cycle_end DATE NOT NULL,
   status TEXT CHECK (status IN ('paid', 'unpaid')) DEFAULT 'paid',
+  screenshot_url TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
