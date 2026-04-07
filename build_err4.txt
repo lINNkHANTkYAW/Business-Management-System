@@ -1,0 +1,72 @@
+﻿vite v6.4.1 building for production...
+transforming...
+Γ£ô 4 modules transformed.
+npx : Γ£ù Build failed 
+in 521ms
+At line:1 char:20
++ $env:NO_COLOR="1"; 
+npx vite build 2>&1 | 
+Out-File -FilePath 
+build_err ...
++                    
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo     
+         : 
+NotSpecified: (Γ£ù     
+Build failed in 521ms  
+  :String) [], 
+RemoteExc    eption
+    + 
+FullyQualifiedErrorI   
+ d : NativeCommandError
+ 
+error during build:
+[vite:css] Failed to 
+load PostCSS config 
+(searchPath: C:/Users/u
+ser/Documents/Capstone 
+Projects/BMS2/Business-
+Management-System-main)
+: [TypeError] Invalid 
+PostCSS Plugin found 
+at: plugins[0]
+
+(@C:\Users\user\Documen
+ts\postcss.config.mjs)
+TypeError: Invalid 
+PostCSS Plugin found 
+at: plugins[0]
+
+(@C:\Users\user\Documen
+ts\postcss.config.mjs)
+    at file:///C:/Users
+/user/Documents/Capston
+e%20Projects/BMS2/Busin
+ess-Management-System-m
+ain/node_modules/vite/d
+ist/node/chunks/dep-D4N
+MHUTW.js:11827:15
+    at Array.forEach 
+(<anonymous>)
+    at plugins (file://
+/C:/Users/user/Document
+s/Capstone%20Projects/B
+MS2/Business-Management
+-System-main/node_modul
+es/vite/dist/node/chunk
+s/dep-D4NMHUTW.js:11809
+:10)
+    at processResult (f
+ile:///C:/Users/user/Do
+cuments/Capstone%20Proj
+ects/BMS2/Business-Mana
+gement-System-main/node
+_modules/vite/dist/node
+/chunks/dep-D4NMHUTW.js
+:11876:20)
+file: C:/Users/user/Doc
+uments/Capstone Project
+s/BMS2/Business-Managem
+ent-System-main/src/ind
+ex.css
+
