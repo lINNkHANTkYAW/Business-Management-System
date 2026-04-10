@@ -10,40 +10,79 @@ import {
   MoreVertical,
   Edit,
   Trash2,
-  Eye
+  Eye,
+  FileDown
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
-import { BURMESE_LABELS, formatCurrency, cn } from '@/lib/utils';
+import { BURMESE_LABELS, formatCurrency, cn, formatDate } from '@/lib/utils';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { uploadFile } from '@/lib/storage';
 import { FileText as FileIcon, ExternalLink } from 'lucide-react';
 
 export default function RealEstate() {
-  const [activeTab, setActiveTab] = useState<'properties' | 'tenants' | 'contracts' | 'payments' | 'deposits'>('properties');
+  const [activeTab, setActiveTab] = useState<'properties' | 'tenants' | 'contracts' | 'payments' | 'deposits' | 'meter-readings'>('properties');
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
   const [selectedDeposit, setSelectedDeposit] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCommonMeterModalOpen, setIsCommonMeterModalOpen] = useState(false);
+  const [globalCommonCharge, setGlobalCommonCharge] = useState<number>(0);
   const [properties, setProperties] = useState<any[]>([]);
   const [tenants, setTenants] = useState<any[]>([]);
   const [contracts, setContracts] = useState<any[]>([]);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [editingRefund, setEditingRefund] = useState<any>(null);
+  const [isEPCModalOpen, setIsEPCModalOpen] = useState(false);
+  const [isComparisonModalOpen, setIsComparisonModalOpen] = useState(false);
+  const [comparisonData, setComparisonData] = useState<any>(null);
+  const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1);
+  const [filterYear, setFilterYear] = useState(new Date().getFullYear());
 
   useEffect(() => {
     fetchData();
-    if (activeTab === 'contracts' || activeTab === 'payments' || activeTab === 'deposits') {
+    if (activeTab === 'contracts' || activeTab === 'payments' || activeTab === 'deposits' || activeTab === 'meter-readings') {
       fetchDropdownData();
     }
-  }, [activeTab]);
+    if (activeTab === 'meter-readings') {
+      fetchLatestCommonCharge();
+    }
+  }, [activeTab, filterMonth, filterYear]);
+
+  async function fetchLatestCommonCharge() {
+    const startDate = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
+    const lastDay = new Date(filterYear, filterMonth, 0).getDate();
+    const endDate = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${lastDay}`;
+
+    const { data } = await supabase
+      .from('re_common_meter_readings')
+      .select('common_charge_per_room')
+      .gte('reading_date', startDate)
+      .lte('reading_date', endDate)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    if (data) {
+      setGlobalCommonCharge(data.common_charge_per_room);
+    } else {
+      // If no reading for this month, maybe fetch the latest overall but don't force it?
+      // For now, let's keep it 0 if not calculated for this month.
+      setGlobalCommonCharge(0);
+    }
+  }
 
   async function fetchDropdownData() {
-    const { data: props } = await supabase.from('re_properties').select('id, name, room_number, status, deposit_amount');
-    const { data: tens } = await supabase.from('re_tenants').select('id, name');
-    const { data: conts } = await supabase.from('re_contracts').select('id, re_properties(name, room_number), re_tenants(name)').eq('status', 'active');
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) return;
+
+    const { data: props } = await supabase.from('re_properties').select('id, name, room_number, status, deposit_amount').eq('user_id', user.id);
+    const { data: tens } = await supabase.from('re_tenants').select('id, name').eq('user_id', user.id);
+    const { data: conts } = await supabase.from('re_contracts').select('id, re_properties(name, room_number), re_tenants(name)').eq('user_id', user.id).eq('status', 'active');
     setProperties(props || []);
     setTenants(tens || []);
     setContracts(conts || []);
@@ -51,17 +90,55 @@ export default function RealEstate() {
 
   async function fetchData() {
     setLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
     let query;
     if (activeTab === 'properties') {
-      query = supabase.from('re_properties').select('*').order('name');
+      query = supabase.from('re_properties').select('*').eq('user_id', user.id).order('name');
     } else if (activeTab === 'tenants') {
-      query = supabase.from('re_tenants').select('*').order('name');
+      query = supabase.from('re_tenants').select('*').eq('user_id', user.id).order('name');
     } else if (activeTab === 'contracts') {
-      query = supabase.from('re_contracts').select('*, re_properties(name, room_number), re_tenants(name)').order('created_at', { ascending: false });
+      query = supabase.from('re_contracts').select('*, re_properties(name, room_number), re_tenants(name)').eq('user_id', user.id).order('created_at', { ascending: false });
     } else if (activeTab === 'payments') {
-      query = supabase.from('re_payments').select('*, re_contracts(*, re_properties(name, room_number), re_tenants(name))').order('payment_date', { ascending: false });
+      query = supabase.from('re_payments').select('*, re_contracts(*, re_properties(name, room_number), re_tenants(name))').eq('user_id', user.id).order('payment_date', { ascending: false });
     } else if (activeTab === 'deposits') {
-      query = supabase.from('re_deposits').select('*, re_contracts(*, re_properties(name, room_number), re_tenants(name)), re_refunds(*)').order('created_at', { ascending: false });
+      query = supabase.from('re_deposits').select('*, re_contracts(*, re_properties(name, room_number), re_tenants(name)), re_refunds(*)').eq('user_id', user.id).order('created_at', { ascending: false });
+    } else if (activeTab === 'meter-readings') {
+      const startDate = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
+      const lastDay = new Date(filterYear, filterMonth, 0).getDate();
+      const endDate = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${lastDay}`;
+      
+      const { data: props } = await supabase.from('re_properties').select('*').eq('user_id', user.id).order('name');
+      const { data: readings } = await supabase.from('re_meter_readings').select('*')
+        .eq('user_id', user.id)
+        .gte('reading_date', startDate)
+        .lte('reading_date', endDate);
+      
+      // Get the single latest reading before this month for EACH property
+      // We'll fetch all previous readings and then pick the latest for each in JS
+      const { data: allPrevReadings } = await supabase.from('re_meter_readings')
+        .select('property_id, current_reading, reading_date')
+        .eq('user_id', user.id)
+        .lt('reading_date', startDate)
+        .order('reading_date', { ascending: false });
+
+      const combined = (props || []).map(p => {
+        const reading = (readings || []).find(r => r.property_id === p.id);
+        const lastReading = (allPrevReadings || []).find(r => r.property_id === p.id);
+        return {
+          ...p,
+          reading,
+          last_meter_from_prev: lastReading?.current_reading || 0
+        };
+      });
+      setData(combined);
+      setLoading(false);
+      return;
     }
 
     if (query) {
@@ -76,23 +153,26 @@ export default function RealEstate() {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const newProperty = {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+
+      const newProperty = {
       name: formData.get('name'),
       room_number: formData.get('room_number'),
       floor_number: formData.get('floor_number'),
       monthly_rent: Number(formData.get('monthly_rent')),
       deposit_amount: Number(formData.get('deposit_amount')),
       status: editingItem ? editingItem.status : 'vacant',
+      user_id: user.id
     };
 
-    try {
-      if (editingItem) {
-        const { error } = await supabase.from('re_properties').update(newProperty).eq('id', editingItem.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('re_properties').insert([newProperty]);
-        if (error) throw error;
-      }
+      const { error } = editingItem 
+        ? await supabase.from('re_properties').update(newProperty).eq('id', editingItem.id)
+        : await supabase.from('re_properties').insert([newProperty]);
+
+      if (error) throw error;
       setIsModalOpen(false);
       setEditingItem(null);
       fetchData();
@@ -107,13 +187,18 @@ export default function RealEstate() {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const newTenant = {
-      name: formData.get('name'),
-      phone: formData.get('phone'),
-      nrc: formData.get('nrc'),
-    };
-
+    
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+      const newTenant = {
+        name: formData.get('name'),
+        phone: formData.get('phone'),
+        nrc: formData.get('nrc'),
+        user_id: user.id
+      };
+
       if (editingItem) {
         const { error } = await supabase.from('re_tenants').update(newTenant).eq('id', editingItem.id);
         if (error) throw error;
@@ -135,11 +220,18 @@ export default function RealEstate() {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const propertyId = formData.get('property_id') as string;
-    const contractFile = formData.get('contract_file') as File;
-    let fileUrl = null;
-
+    
     try {
+      const { data: { session }, error: authError } = await supabase.auth.getSession();
+      if (authError || !session?.user) {
+        throw new Error('Authentication error: ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+      }
+      const user = session.user;
+
+      const propertyId = formData.get('property_id') as string;
+      const contractFile = formData.get('contract_file') as File;
+      let fileUrl = null;
+
       if (contractFile && contractFile.size > 0) {
         const fileName = `${Date.now()}_${contractFile.name}`;
         fileUrl = await uploadFile('screenshots', `contracts/${fileName}`, contractFile);
@@ -153,6 +245,7 @@ export default function RealEstate() {
         end_date: formData.get('end_date') as string,
         file_url: fileUrl,
         status: 'active',
+        user_id: user.id
       };
 
       const { error: contractError, data: contractData } = editingItem 
@@ -160,6 +253,9 @@ export default function RealEstate() {
         : await supabase.from('re_contracts').insert([newContract]).select();
         
       if (contractError) throw contractError;
+      if (!contractData || contractData.length === 0) {
+        throw new Error('စာချုပ်သိမ်းဆည်းရာတွင် အမှားအယွင်းရှိပါသည်။ (No data returned)');
+      }
 
       if (!editingItem) {
         // Create reminder (7 days before end_date)
@@ -176,7 +272,8 @@ export default function RealEstate() {
           due_date: reminderDate.toISOString().split('T')[0],
           type: 'contract',
           related_id: contractData[0].id,
-          status: 'pending'
+          status: 'pending',
+          user_id: user.id
         }]);
 
         // Create deposit entry
@@ -186,12 +283,20 @@ export default function RealEstate() {
             contract_id: contractData[0].id,
             amount: property.deposit_amount,
             payment_date: newContract.start_date,
-            status: 'held'
+            status: 'held',
+            user_id: user.id
           }]);
         }
 
         // Update property status to occupied
-        await supabase.from('re_properties').update({ status: 'occupied' }).eq('id', propertyId);
+        const { error: propUpdateError } = await supabase.from('re_properties')
+          .update({ status: 'occupied' })
+          .eq('id', propertyId)
+          .eq('user_id', user.id);
+        
+        if (propUpdateError) {
+          console.error('Error updating property status:', propUpdateError);
+        }
       }
       
       setIsModalOpen(false);
@@ -208,10 +313,16 @@ export default function RealEstate() {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const screenshotFile = formData.get('screenshot') as File;
-    let screenshotUrl = null;
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) {
+        throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+      }
+      const screenshotFile = formData.get('screenshot') as File;
+      let screenshotUrl = null;
+
       if (screenshotFile && screenshotFile.size > 0) {
         const fileName = `${Date.now()}_${screenshotFile.name}`;
         screenshotUrl = await uploadFile('screenshots', `payments/${fileName}`, screenshotFile);
@@ -223,6 +334,7 @@ export default function RealEstate() {
         payment_date: formData.get('payment_date'),
         method: formData.get('method'),
         screenshot_url: screenshotUrl || (editingItem ? editingItem.screenshot_url : null),
+        user_id: user.id
       };
 
       if (editingItem) {
@@ -247,14 +359,21 @@ export default function RealEstate() {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const newDeposit = {
-      contract_id: formData.get('contract_id'),
-      amount: Number(formData.get('amount')),
-      payment_date: formData.get('payment_date'),
-      status: editingItem ? editingItem.status : 'held',
-    };
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) {
+        throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+      }
+      const newDeposit = {
+        contract_id: formData.get('contract_id'),
+        amount: Number(formData.get('amount')),
+        payment_date: formData.get('payment_date'),
+        status: editingItem ? editingItem.status : 'held',
+        user_id: user.id
+      };
+
       if (editingItem) {
         const { error } = await supabase.from('re_deposits').update(newDeposit).eq('id', editingItem.id);
         if (error) throw error;
@@ -276,10 +395,17 @@ export default function RealEstate() {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const screenshotFile = formData.get('screenshot') as File;
-    let screenshotUrl = null;
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) {
+        throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+      }
+
+      const screenshotFile = formData.get('screenshot') as File;
+      let screenshotUrl = null;
+
       if (screenshotFile && screenshotFile.size > 0) {
         const fileName = `${Date.now()}_${screenshotFile.name}`;
         screenshotUrl = await uploadFile('screenshots', `refunds/${fileName}`, screenshotFile);
@@ -292,6 +418,7 @@ export default function RealEstate() {
         refund_date: formData.get('refund_date'),
         reason: formData.get('reason'),
         screenshot_url: screenshotUrl || (editingRefund ? editingRefund.screenshot_url : null),
+        user_id: user.id
       };
 
       if (editingRefund) {
@@ -315,12 +442,96 @@ export default function RealEstate() {
     }
   }
 
+  async function handleAddMeterReading(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setIsSubmitting(true);
+    const formData = new FormData(e.currentTarget);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+
+      const meterReading = {
+        property_id: formData.get('property_id'),
+        reading_date: formData.get('reading_date'),
+        previous_reading: Number(formData.get('previous_reading')),
+        current_reading: Number(formData.get('current_reading')),
+        unit_price: 550,
+        water_charge: Number(formData.get('water_charge')),
+        service_charge: Number(formData.get('service_charge')),
+        common_charge: Number(formData.get('common_charge')),
+        total_amount: Number(formData.get('total_amount')),
+        user_id: user.id
+      };
+
+      const { error } = editingItem 
+        ? await supabase.from('re_meter_readings').update(meterReading).eq('id', editingItem.id)
+        : await supabase.from('re_meter_readings').insert([meterReading]);
+
+      if (error) throw error;
+      setIsModalOpen(false);
+      setEditingItem(null);
+      fetchData();
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleDeleteItem(table: string, id: string) {
+    if (!confirm('ဤအချက်အလက်ကို ဖျက်ပစ်ရန် သေချာပါသလား?')) return;
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+
+      const { error } = await supabase
+        .from(table)
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+      
+      if (error) throw error;
+      fetchData();
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    }
+  }
+
+  async function handleOpenComparison(epcData: any) {
+    const startDate = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
+    const lastDay = new Date(filterYear, filterMonth, 0).getDate();
+    const endDate = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${lastDay}`;
+
+    // Fetch the latest common reading for this month
+    const { data: commonData } = await supabase
+      .from('re_common_meter_readings')
+      .select('*')
+      .gte('reading_date', startDate)
+      .lte('reading_date', endDate)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    setComparisonData({
+      common: commonData,
+      epc: epcData,
+      month: filterMonth,
+      year: filterYear
+    });
+    setIsComparisonModalOpen(true);
+  }
+
   const tabs = [
     { id: 'properties', label: BURMESE_LABELS.realEstate.properties, icon: Building2 },
     { id: 'tenants', label: BURMESE_LABELS.realEstate.tenants, icon: Users },
     { id: 'contracts', label: BURMESE_LABELS.realEstate.contracts, icon: FileText },
     { id: 'payments', label: BURMESE_LABELS.realEstate.payments, icon: CreditCard },
     { id: 'deposits', label: 'စပေါ်ငွေနှင့် ပြန်အမ်းငွေ', icon: CreditCard },
+    { id: 'meter-readings', label: BURMESE_LABELS.realEstate.meterReadings, icon: FileText },
   ];
 
   return (
@@ -338,9 +549,53 @@ export default function RealEstate() {
            activeTab === 'tenants' ? 'အိမ်ငှားအသစ်ထည့်မည်' :
            activeTab === 'contracts' ? 'စာချုပ်အသစ်ချုပ်မည်' :
            activeTab === 'payments' ? 'ငွေပေးချေမှုအသစ်ထည့်မည်' :
+           activeTab === 'meter-readings' ? 'မီတာခအသစ်ထည့်မည်' :
            'စပေါ်ငွေအသစ်ထည့်မည်'}
         </Button>
       </header>
+
+      {activeTab === 'meter-readings' && (
+        <div className="flex justify-start mb-4">
+          <Button 
+            variant="secondary"
+            onClick={() => setIsCommonMeterModalOpen(true)}
+            icon={<CreditCard size={18} />}
+          >
+            ဘုံမီတာတွက်ရန်
+          </Button>
+
+          <Button 
+            variant="secondary"
+            onClick={() => setIsEPCModalOpen(true)}
+            icon={<CreditCard size={18} />}
+          >
+            EPC Meter နှိုင်းယှဉ်ရန်
+          </Button>
+          
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 border rounded-lg shadow-sm">
+            <select 
+              value={filterMonth} 
+              onChange={(e) => setFilterMonth(Number(e.target.value))}
+              className="outline-none bg-transparent text-sm font-medium"
+            >
+              {[...Array(12)].map((_, i) => (
+                <option key={i + 1} value={i + 1}>
+                  {new Intl.DateTimeFormat('my-MM', { month: 'long' }).format(new Date(2000, i))}
+                </option>
+              ))}
+            </select>
+            <select 
+              value={filterYear} 
+              onChange={(e) => setFilterYear(Number(e.target.value))}
+              className="outline-none bg-transparent text-sm font-medium border-l pl-2"
+            >
+              {[2024, 2025, 2026, 2027, 2028].map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
       <div className="flex border-b border-slate-200">
         {tabs.map((tab) => (
@@ -348,7 +603,7 @@ export default function RealEstate() {
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
             className={cn(
-              "flex items-center gap-2 px-6 py-3 font-medium transition-colors border-b-2",
+               "flex items-center gap-2 px-6 py-3 font-medium transition-colors border-b-2",
               activeTab === tab.id 
                 ? "border-blue-600 text-blue-600" 
                 : "border-transparent text-slate-500 hover:text-slate-700"
@@ -427,6 +682,16 @@ export default function RealEstate() {
                   <th className="px-6 py-3 font-semibold">{BURMESE_LABELS.common.actions}</th>
                 </tr>
               )}
+              {activeTab === 'meter-readings' && (
+                <tr>
+                  <th className="px-6 py-3 font-semibold">{BURMESE_LABELS.meterReading.roomNo}</th>
+                  <th className="px-6 py-3 font-semibold">{BURMESE_LABELS.meterReading.meterNow}</th>
+                  <th className="px-6 py-3 font-semibold">{BURMESE_LABELS.meterReading.meterLast}</th>
+                  <th className="px-6 py-3 font-semibold">{BURMESE_LABELS.meterReading.totalUnit}</th>
+                  <th className="px-6 py-3 font-semibold">{BURMESE_LABELS.meterReading.totalAmount}</th>
+                  <th className="px-6 py-3 font-semibold">{BURMESE_LABELS.common.actions}</th>
+                </tr>
+              )}
             </thead>
             <tbody className="divide-y divide-slate-100">
               {data.map((item) => (
@@ -459,6 +724,13 @@ export default function RealEstate() {
                           >
                             <Edit size={18} />
                           </button>
+                          <button 
+                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
+                            onClick={() => handleDeleteItem('re_properties', item.id)}
+                            title="ဖျက်မည်"
+                          >
+                            <Trash2 size={18} />
+                          </button>
                         </div>
                       </td>
                     </>
@@ -478,6 +750,13 @@ export default function RealEstate() {
                             }}
                           >
                             <Edit size={18} />
+                          </button>
+                          <button 
+                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
+                            onClick={() => handleDeleteItem('re_tenants', item.id)}
+                            title="ဖျက်မည်"
+                          >
+                            <Trash2 size={18} />
                           </button>
                         </div>
                       </td>
@@ -520,6 +799,13 @@ export default function RealEstate() {
                           >
                             <Edit size={18} />
                           </button>
+                          <button 
+                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
+                            onClick={() => handleDeleteItem('re_contracts', item.id)}
+                            title="ဖျက်မည်"
+                          >
+                            <Trash2 size={18} />
+                          </button>
                         </div>
                       </td>
                     </>
@@ -557,6 +843,13 @@ export default function RealEstate() {
                             }}
                           >
                             <Edit size={18} />
+                          </button>
+                          <button 
+                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
+                            onClick={() => handleDeleteItem('re_payments', item.id)}
+                            title="ဖျက်မည်"
+                          >
+                            <Trash2 size={18} />
                           </button>
                         </div>
                       </td>
@@ -600,7 +893,7 @@ export default function RealEstate() {
                           </div>
                         ) : '-'}
                       </td>
-                      <td className="px-6 py-4">
+                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           {item.status === 'held' && (
                             <Button 
@@ -614,16 +907,86 @@ export default function RealEstate() {
                               ပြန်အမ်းမည်
                             </Button>
                           )}
-                          <button 
-                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-amber-600 transition-colors"
-                            title="စပေါ်ငွေ ပြင်ဆင်မည်"
-                            onClick={() => {
-                              setEditingItem(item);
-                              setIsModalOpen(true);
-                            }}
-                          >
-                            <Edit size={18} />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button 
+                              className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-amber-600 transition-colors"
+                              title="စပေါ်ငွေ ပြင်ဆင်မည်"
+                              onClick={() => {
+                                setEditingItem(item);
+                                setIsModalOpen(true);
+                              }}
+                            >
+                              <Edit size={18} />
+                            </button>
+                            <button 
+                              className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
+                              title="ဖျက်မည်"
+                              onClick={() => handleDeleteItem('re_deposits', item.id)}
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </>
+                  )}
+                  {activeTab === 'meter-readings' && (
+                    <>
+                      <td className="px-6 py-4 font-medium">
+                        {item.name} ({item.room_number})
+                        {item.reading && <div className="text-xs text-slate-500">{formatDate(item.reading.reading_date)}</div>}
+                      </td>
+                      <td className="px-6 py-4 font-bold">
+                        {item.reading ? (
+                          <span className="text-amber-600">{item.reading.current_reading}</span>
+                        ) : (
+                          <span className="text-slate-300">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-slate-600">
+                        {item.reading ? item.reading.previous_reading : item.last_meter_from_prev}
+                      </td>
+                      <td className="px-6 py-4 font-bold text-blue-600">
+                        {item.reading ? `${item.reading.current_reading - item.reading.previous_reading} Units` : '-'}
+                      </td>
+                      <td className="px-6 py-4 font-bold text-emerald-600">
+                        {item.reading ? formatCurrency(item.reading.total_amount) : (
+                          <span className="text-xs font-medium px-2 py-1 bg-amber-100 text-amber-700 rounded-full">မထည့်ရသေးပါ</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          {item.reading ? (
+                            <>
+                              <button 
+                                className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-amber-600 transition-colors"
+                                onClick={() => {
+                                  setEditingItem(item.reading);
+                                  setIsModalOpen(true);
+                                }}
+                              >
+                                <Edit size={18} />
+                              </button>
+                              <button 
+                                className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
+                                onClick={() => handleDeleteItem('re_meter_readings', item.reading.id)}
+                                title="ဖျက်မည်"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </>
+                          ) : (
+                            <Button 
+                              size="sm" 
+                              variant="secondary"
+                              onClick={() => {
+                                setEditingItem({ property_id: item.id, previous_reading: item.last_meter_from_prev });
+                                setIsModalOpen(true);
+                              }}
+                            >
+                              အသစ်ထည့်မည်
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </>
@@ -905,6 +1268,509 @@ export default function RealEstate() {
           </div>
         </form>
       </Modal>
+      <Modal 
+        isOpen={isModalOpen && activeTab === 'meter-readings'} 
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingItem(null);
+        }}
+        title={editingItem ? "မီတာခအချက်အလက်ပြင်မည်" : "မီတာခအသစ်ထည့်မည်"}
+      >
+        <MeterReadingForm 
+          editingItem={editingItem}
+          properties={properties}
+          onSubmit={handleAddMeterReading}
+          onCancel={() => {
+            setIsModalOpen(false);
+            setEditingItem(null);
+          }}
+          isSubmitting={isSubmitting}
+          globalCommonCharge={globalCommonCharge}
+          selectedMonth={filterMonth}
+          selectedYear={filterYear}
+        />
+      </Modal>
+
+      <Modal
+        isOpen={isCommonMeterModalOpen}
+        onClose={() => setIsCommonMeterModalOpen(false)}
+        title="ဘုံမီတာတွက်ရန်"
+      >
+        <CommonMeterModal 
+          mode="common"
+          onSave={(value: number) => {
+            setGlobalCommonCharge(value);
+            setIsCommonMeterModalOpen(false);
+          }}
+          onCancel={() => setIsCommonMeterModalOpen(false)}
+          selectedMonth={filterMonth}
+          selectedYear={filterYear}
+        />
+      </Modal>
+
+      <Modal
+        isOpen={isEPCModalOpen}
+        onClose={() => setIsEPCModalOpen(false)}
+        title="EPC Meter နှိုင်းယှဉ်ရန်"
+      >
+        <CommonMeterModal 
+          mode="epc"
+          onSave={(epcData: any) => {
+            handleOpenComparison(epcData);
+            setIsEPCModalOpen(false);
+          }}
+          onCancel={() => setIsEPCModalOpen(false)}
+          selectedMonth={filterMonth}
+          selectedYear={filterYear}
+        />
+      </Modal>
+
+      <Modal
+        isOpen={isComparisonModalOpen}
+        onClose={() => setIsComparisonModalOpen(false)}
+        title="မီတာနှိုင်းယှဉ်ချက်"
+      >
+        {comparisonData && (
+          <EPCComparisonModal 
+            data={comparisonData} 
+            onClose={() => setIsComparisonModalOpen(false)} 
+          />
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+function MeterReadingForm({ editingItem, properties, onSubmit, onCancel, isSubmitting, globalCommonCharge, selectedMonth, selectedYear }: any) {
+  const defaultDate = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`;
+  const [formData, setFormData] = useState({
+    property_id: editingItem?.property_id || '',
+    reading_date: editingItem?.reading_date || defaultDate,
+    previous_reading: editingItem?.previous_reading || 0,
+    current_reading: editingItem?.current_reading || 0,
+    water_charge: editingItem?.water_charge || 0,
+    service_charge: editingItem?.service_charge || 0,
+    common_charge: editingItem?.common_charge || globalCommonCharge || 0,
+    total_amount: editingItem?.total_amount || 0
+  });
+
+  useEffect(() => {
+    if (editingItem) {
+      setFormData({
+        property_id: editingItem.property_id || '',
+        reading_date: editingItem.reading_date || defaultDate,
+        previous_reading: editingItem.previous_reading || 0,
+        current_reading: editingItem.current_reading || 0,
+        water_charge: editingItem.water_charge || 0,
+        service_charge: editingItem.service_charge || 0,
+        common_charge: editingItem.common_charge || 0,
+        total_amount: editingItem.total_amount || 0
+      });
+    } else {
+      setFormData({
+        property_id: '',
+        reading_date: defaultDate,
+        previous_reading: 0,
+        current_reading: 0,
+        water_charge: 0,
+        service_charge: 0,
+        common_charge: globalCommonCharge || 0,
+        total_amount: 0
+      });
+    }
+  }, [editingItem, globalCommonCharge, defaultDate]);
+
+  useEffect(() => {
+    if (!editingItem && formData.property_id) {
+      fetchPreviousReading(formData.property_id);
+    }
+  }, [formData.property_id]);
+
+  async function fetchPreviousReading(propertyId: string) {
+    const { data, error } = await supabase
+      .from('re_meter_readings')
+      .select('current_reading')
+      .eq('property_id', propertyId)
+      .order('reading_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    if (data && !error) {
+      setFormData(prev => ({ ...prev, previous_reading: data.current_reading }));
+    } else {
+      setFormData(prev => ({ ...prev, previous_reading: 0 }));
+    }
+  }
+
+  useEffect(() => {
+    const units = Math.max(0, formData.current_reading - formData.previous_reading);
+    const total = (units * 550) + Number(formData.water_charge) + Number(formData.service_charge) + Number(formData.common_charge);
+    setFormData(prev => ({ ...prev, total_amount: total }));
+  }, [formData.previous_reading, formData.current_reading, formData.water_charge, formData.service_charge, formData.common_charge]);
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">{BURMESE_LABELS.meterReading.roomNo}</label>
+        <select 
+          name="property_id" 
+          value={formData.property_id}
+          onChange={(e) => setFormData({...formData, property_id: e.target.value})}
+          required 
+          className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none"
+        >
+          <option value="">အခန်းရွေးချယ်ပါ</option>
+          {properties.map((p: any) => (
+            <option key={p.id} value={p.id}>{p.name} ({p.room_number})</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">ရက်စွဲ</label>
+        <input 
+          type="date" 
+          name="reading_date" 
+          value={formData.reading_date}
+          onChange={(e) => setFormData({...formData, reading_date: e.target.value})}
+          required 
+          className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" 
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">{BURMESE_LABELS.meterReading.meterLast}</label>
+          <input 
+            type="number" 
+            name="previous_reading" 
+            value={formData.previous_reading}
+            onChange={(e) => setFormData({...formData, previous_reading: Number(e.target.value)})}
+            required 
+            className="w-full px-4 py-2 border rounded-lg bg-slate-50 outline-none" 
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">{BURMESE_LABELS.meterReading.meterNow}</label>
+          <input 
+            type="number" 
+            name="current_reading" 
+            value={formData.current_reading}
+            onChange={(e) => setFormData({...formData, current_reading: Number(e.target.value)})}
+            required 
+            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none" 
+          />
+        </div>
+      </div>
+      <div className="bg-blue-50 p-3 rounded-lg flex justify-between items-center text-blue-700 font-bold mb-4">
+        <span>{BURMESE_LABELS.meterReading.totalUnit}</span>
+        <span>{Math.max(0, formData.current_reading - formData.previous_reading)} Units</span>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">{BURMESE_LABELS.meterReading.waterCharge}</label>
+          <input 
+            type="number" 
+            name="water_charge" 
+            value={formData.water_charge}
+            onChange={(e) => setFormData({...formData, water_charge: Number(e.target.value)})}
+            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none text-sm" 
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">{BURMESE_LABELS.meterReading.serviceCharge}</label>
+          <input 
+            type="number" 
+            name="service_charge" 
+            value={formData.service_charge}
+            onChange={(e) => setFormData({...formData, service_charge: Number(e.target.value)})}
+            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none text-sm" 
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">{BURMESE_LABELS.meterReading.commonCharge}</label>
+          <input 
+            type="number" 
+            name="common_charge" 
+            value={formData.common_charge}
+            onChange={(e) => setFormData({...formData, common_charge: Number(e.target.value)})}
+            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 outline-none text-sm" 
+          />
+        </div>
+      </div>
+      <div className="pt-2 border-t mt-4">
+        <div className="flex justify-between items-center mb-4">
+          <span className="text-slate-600 font-medium">{BURMESE_LABELS.meterReading.totalAmount}</span>
+          <span className="text-xl font-bold text-emerald-600">{formatCurrency(formData.total_amount)}</span>
+          <input type="hidden" name="total_amount" value={formData.total_amount} />
+        </div>
+        <div className="flex gap-3">
+          <Button type="button" variant="secondary" className="flex-1" onClick={onCancel}>ပယ်ဖျက်မည်</Button>
+          <Button type="submit" className="flex-1" loading={isSubmitting}>သိမ်းဆည်းမည်</Button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+function CommonMeterModal({ onSave, onCancel, selectedMonth, selectedYear, mode = 'common' }: any) {
+  const selectedDate = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`;
+  const tableName = mode === 'common' ? 're_common_meter_readings' : 're_epc_meter_readings';
+  
+  const [readings, setReadings] = useState([
+    { building: 'A', floor: 'Floor 1', last: 0, now: 0 },
+    { building: 'A', floor: 'Floor 2', last: 0, now: 0 },
+    { building: 'A', floor: 'Floor 3', last: 0, now: 0 },
+    { building: 'B', floor: 'Floor 1', last: 0, now: 0 },
+    { building: 'B', floor: 'Floor 2', last: 0, now: 0 },
+    { building: 'B', floor: 'Floor 3', last: 0, now: 0 },
+  ]);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    fetchLastReadings();
+  }, [mode, selectedMonth, selectedYear]);
+
+  async function fetchLastReadings() {
+    const startDate = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`;
+    const lastDay = new Date(selectedYear, selectedMonth, 0).getDate();
+    const endDate = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${lastDay}`;
+
+    // 1. Try to fetch the entry for the SELECTED month
+    const { data: currentMonth } = await supabase
+      .from(tableName)
+      .select('*')
+      .gte('reading_date', startDate)
+      .lte('reading_date', endDate)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (currentMonth) {
+      setReadings([
+        { building: 'A', floor: 'Floor 1', last: currentMonth.a_f1_last, now: currentMonth.a_f1_now },
+        { building: 'A', floor: 'Floor 2', last: currentMonth.a_f2_last, now: currentMonth.a_f2_now },
+        { building: 'A', floor: 'Floor 3', last: currentMonth.a_f3_last, now: currentMonth.a_f3_now },
+        { building: 'B', floor: 'Floor 1', last: currentMonth.b_f1_last, now: currentMonth.b_f1_now },
+        { building: 'B', floor: 'Floor 2', last: currentMonth.b_f2_last, now: currentMonth.b_f2_now },
+        { building: 'B', floor: 'Floor 3', last: currentMonth.b_f3_last, now: currentMonth.b_f3_now },
+      ]);
+      return;
+    }
+
+    // 2. If no entry for this month, find the LATEST entry BEFORE this month to pre-fill "last" fields
+    const { data: previous } = await supabase
+      .from(tableName)
+      .select('*')
+      .lt('reading_date', startDate)
+      .order('reading_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (previous) {
+      setReadings([
+        { building: 'A', floor: 'Floor 1', last: previous.a_f1_now, now: 0 },
+        { building: 'A', floor: 'Floor 2', last: previous.a_f2_now, now: 0 },
+        { building: 'A', floor: 'Floor 3', last: previous.a_f3_now, now: 0 },
+        { building: 'B', floor: 'Floor 1', last: previous.b_f1_now, now: 0 },
+        { building: 'B', floor: 'Floor 2', last: previous.b_f2_now, now: 0 },
+        { building: 'B', floor: 'Floor 3', last: previous.b_f3_now, now: 0 },
+      ]);
+    } else {
+      // Reset if no history at all
+      setReadings([
+        { building: 'A', floor: 'Floor 1', last: 0, now: 0 },
+        { building: 'A', floor: 'Floor 2', last: 0, now: 0 },
+        { building: 'A', floor: 'Floor 3', last: 0, now: 0 },
+        { building: 'B', floor: 'Floor 1', last: 0, now: 0 },
+        { building: 'B', floor: 'Floor 2', last: 0, now: 0 },
+        { building: 'B', floor: 'Floor 3', last: 0, now: 0 },
+      ]);
+    }
+  }
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+
+      const totalUnits = readings.reduce((acc, r) => acc + Math.max(0, r.now - r.last), 0);
+      const totalCost = totalUnits * 550;
+      
+      const record: any = {
+        user_id: user.id,
+        reading_date: selectedDate,
+        a_f1_last: readings[0].last, a_f1_now: readings[0].now,
+        a_f2_last: readings[1].last, a_f2_now: readings[1].now,
+        a_f3_last: readings[2].last, a_f3_now: readings[2].now,
+        b_f1_last: readings[3].last, b_f1_now: readings[3].now,
+        b_f2_last: readings[4].last, b_f2_now: readings[4].now,
+        b_f3_last: readings[5].last, b_f3_now: readings[5].now,
+        total_units: totalUnits,
+        total_cost: totalCost
+      };
+
+      if (mode === 'common') {
+        record.common_charge_per_room = Math.round(totalCost / 21);
+      }
+
+      const { data: savedData, error } = await supabase.from(tableName).insert([record]).select().single();
+      if (error) throw error;
+      
+      onSave(mode === 'common' ? record.common_charge_per_room : savedData);
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const totalUnits = readings.reduce((acc, r) => acc + Math.max(0, r.now - r.last), 0);
+  const totalCost = totalUnits * 550;
+  const commonCharge = Math.round(totalCost / 21);
+
+  const handleUpdate = (index: number, field: 'last' | 'now', value: number) => {
+    const newReadings = [...readings];
+    newReadings[index][field] = value;
+    setReadings(newReadings);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="max-h-[60vh] overflow-y-auto pr-2 space-y-4">
+        {readings.map((r, i) => (
+          <div key={i} className="p-3 bg-slate-50 rounded-lg space-y-2">
+            <div className="font-bold text-slate-700">Building {r.building} - {r.floor}</div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">ပြီးခဲ့သည့်လမီတာ</label>
+                <input 
+                  type="number" 
+                  value={r.last || ''} 
+                  onChange={(e) => handleUpdate(i, 'last', Number(e.target.value))}
+                  className="w-full px-3 py-1.5 border rounded focus:ring-1 focus:ring-blue-500 outline-none" 
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 block mb-1">ယခုလမီတာ</label>
+                <input 
+                  type="number" 
+                  value={r.now || ''} 
+                  onChange={(e) => handleUpdate(i, 'now', Number(e.target.value))}
+                  className="w-full px-3 py-1.5 border rounded focus:ring-1 focus:ring-blue-500 outline-none" 
+                />
+              </div>
+            </div>
+            <div className="text-xs text-blue-600 font-medium">
+              ယူနစ်စုစုပေါင်း: {Math.max(0, r.now - r.last)}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="border-t pt-4 space-y-2">
+        <div className="flex justify-between text-slate-600">
+          <span>ယူနစ်စုစုပေါင်း:</span>
+          <span className="font-bold">{totalUnits} Units</span>
+        </div>
+        <div className="flex justify-between text-slate-600">
+          <span>မီတာခစုစုပေါင်း:</span>
+          <span className="font-bold text-blue-600">{formatCurrency(totalCost)}</span>
+        </div>
+        {mode === 'common' && (
+          <div className="flex justify-between items-center p-3 bg-emerald-50 rounded-lg">
+            <span className="text-emerald-700 font-bold">ဘုံအသုံးစရိတ် (Price / 21):</span>
+            <span className="text-xl font-bold text-emerald-600">{formatCurrency(commonCharge)}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-3 pt-2">
+        <Button variant="secondary" className="flex-1" onClick={onCancel}>ပယ်ဖျက်မည်</Button>
+        <Button className="flex-1" onClick={handleSave} loading={isSaving}>
+          {mode === 'common' ? 'သိမ်းဆည်းမည်' : 'နှိုင်းယှဉ်မည်'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function EPCComparisonModal({ data, onClose }: any) {
+  const common = data.common;
+  const epc = data.epc;
+
+  const handleDownload = () => {
+    const reportData = [
+      { 'အကြောင်းအရာ': 'Building A - Floor 1', 'Common Units': common?.a_f1_now - common?.a_f1_last || 0, 'EPC Units': epc.a_f1_now - epc.a_f1_last },
+      { 'အကြောင်းအရာ': 'Building A - Floor 2', 'Common Units': common?.a_f2_now - common?.a_f2_last || 0, 'EPC Units': epc.a_f2_now - epc.a_f2_last },
+      { 'အကြောင်းအရာ': 'Building A - Floor 3', 'Common Units': common?.a_f3_now - common?.a_f3_last || 0, 'EPC Units': epc.a_f3_now - epc.a_f3_last },
+      { 'အကြောင်းအရာ': 'Building B - Floor 1', 'Common Units': common?.b_f1_now - common?.b_f1_last || 0, 'EPC Units': epc.b_f1_now - epc.b_f1_last },
+      { 'အကြောင်းအရာ': 'Building B - Floor 2', 'Common Units': common?.b_f2_now - common?.b_f2_last || 0, 'EPC Units': epc.b_f2_now - epc.b_f2_last },
+      { 'အကြောင်းအရာ': 'Building B - Floor 3', 'Common Units': common?.b_f3_now - common?.b_f3_last || 0, 'EPC Units': epc.b_f3_now - epc.b_f3_last },
+      { 'အကြောင်းအရာ': '---', 'Common Units': '---', 'EPC Units': '---' },
+      { 
+        'အကြောင်းအရာ': 'စုစုပေါင်း ယူနစ်', 
+        'Common Units': common?.total_units || 0, 
+        'EPC Units': epc.total_units 
+      },
+      { 
+        'အကြောင်းအရာ': 'စုစုပေါင်း ကုန်ကျစရိတ်', 
+        'Common Units': common?.total_cost || 0, 
+        'EPC Units': epc.total_cost 
+      },
+      { 
+        'အကြောင်းအရာ': 'ကွာခြားချက် (Loss/Gain)', 
+        'Common Units': '', 
+        'EPC Units': (epc.total_units - (common?.total_units || 0)) + ' Units' 
+      }
+    ];
+
+    const worksheet = XLSX.utils.json_to_sheet(reportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Comparison');
+    XLSX.writeFile(workbook, `EPC_Comparison_${data.month}_${data.year}.xlsx`);
+  };
+
+  return (
+    <div className="space-y-6">
+      {!common && (
+        <div className="p-4 bg-amber-50 text-amber-700 rounded-lg flex items-start gap-3">
+          <AlertCircle className="shrink-0" size={20} />
+          <p className="text-sm">ဤလအတွက် ဘုံမီတာတွက်ချက်မှု မရှိသေးပါ။ EPC မီတာနှင့်သာ ပြသထားပါသည်။</p>
+        </div>
+      )}
+
+      <div className="overflow-x-auto border rounded-xl">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b">
+            <tr>
+              <th className="px-4 py-2 text-left">အကြောင်းအရာ</th>
+              <th className="px-4 py-2 text-right">Building Meter</th>
+              <th className="px-4 py-2 text-right">EPC Meter</th>
+              <th className="px-4 py-2 text-right">ကွာခြားချက်</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            <tr>
+              <td className="px-4 py-3 font-medium text-slate-700">ယူနစ်စုစုပေါင်း</td>
+              <td className="px-4 py-3 text-right font-bold text-blue-600">{common?.total_units || 0}</td>
+              <td className="px-4 py-3 text-right font-bold text-amber-600">{epc.total_units}</td>
+              <td className="px-4 py-3 text-right font-bold text-rose-600">{epc.total_units - (common?.total_units || 0)}</td>
+            </tr>
+            <tr>
+              <td className="px-4 py-3 font-medium text-slate-700">ကုန်ကျစရိတ်စုစုပေါင်း</td>
+              <td className="px-4 py-3 text-right font-bold text-emerald-600">{formatCurrency(common?.total_cost || 0)}</td>
+              <td className="px-4 py-3 text-right font-bold text-amber-600">{formatCurrency(epc.total_cost)}</td>
+              <td className="px-4 py-3 text-right font-bold text-rose-600">{formatCurrency(epc.total_cost - (common?.total_cost || 0))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex gap-3">
+        <Button variant="secondary" className="flex-1" onClick={onClose}>ပိတ်မည်</Button>
+        <Button className="flex-1" onClick={handleDownload} icon={<FileDown size={18} />}>Excel ထုတ်ယူမည်</Button>
+      </div>
     </div>
   );
 }

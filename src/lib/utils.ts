@@ -14,8 +14,11 @@ export function formatCurrency(amount: number) {
   }).format(amount);
 }
 
-export function formatDate(date: string | Date) {
-  return format(new Date(date), 'dd/MM/yyyy');
+export function formatDate(date: string | Date | null | undefined) {
+  if (!date) return '-';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '-';
+  return format(d, 'dd/MM/yyyy');
 }
 
 export const BURMESE_LABELS = {
@@ -49,6 +52,7 @@ export const BURMESE_LABELS = {
     contracts: 'စာချုပ်များ',
     payments: 'ငွေပေးချေမှုများ',
     expenses: 'အသုံးစရိတ်များ',
+    meterReadings: 'မီတာခနှင့် အထွေထွေအသုံးစရိတ်',
     occupied: 'ငှားထားသည်',
     vacant: 'အားသည်',
     inactive: 'ရပ်ဆိုင်းထားသည်',
@@ -61,5 +65,16 @@ export const BURMESE_LABELS = {
     maintenance: 'ပြုပြင်ထိန်းသိမ်းမှု',
     taxi: 'တက္ကစီ',
     hijet: 'ဟိုက်ဂျက်',
+  },
+  meterReading: {
+    roomNo: 'အခန်းနံပါတ်',
+    meterNow: 'ယခုလမီတာ',
+    meterLast: 'ပြီးခဲ့သည့်လမီတာ',
+    totalUnit: 'မီတာယူနစ်စုစုပေါင်း',
+    unitCharge: 'မီတာခ (၅၅၀ ကျပ်)',
+    commonCharge: 'ဘုံအသုံးစရိတ်',
+    waterCharge: 'ရေဖိုး',
+    serviceCharge: 'ဝန်ဆောင်ခ',
+    totalAmount: 'စုစုပေါင်း ကျသင့်ငွေ',
   },
 };

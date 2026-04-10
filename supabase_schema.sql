@@ -11,6 +11,7 @@ CREATE TABLE profiles (
 -- 2. Real Estate Module
 CREATE TABLE re_properties (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   name TEXT NOT NULL,
   room_number TEXT NOT NULL,
   floor_number TEXT,
@@ -22,6 +23,7 @@ CREATE TABLE re_properties (
 
 CREATE TABLE re_tenants (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   name TEXT NOT NULL,
   phone TEXT NOT NULL,
   nrc TEXT,
@@ -30,6 +32,7 @@ CREATE TABLE re_tenants (
 
 CREATE TABLE re_contracts (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   property_id UUID REFERENCES re_properties(id) ON DELETE CASCADE,
   tenant_id UUID REFERENCES re_tenants(id) ON DELETE CASCADE,
   type TEXT CHECK (type IN ('monthly', 'yearly')) NOT NULL,
@@ -42,6 +45,7 @@ CREATE TABLE re_contracts (
 
 CREATE TABLE re_payments (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   contract_id UUID REFERENCES re_contracts(id) ON DELETE CASCADE,
   amount NUMERIC NOT NULL,
   payment_date DATE DEFAULT CURRENT_DATE,
@@ -52,6 +56,7 @@ CREATE TABLE re_payments (
 
 CREATE TABLE re_deposits (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   contract_id UUID REFERENCES re_contracts(id) ON DELETE CASCADE,
   amount NUMERIC NOT NULL,
   payment_date DATE DEFAULT CURRENT_DATE,
@@ -61,6 +66,7 @@ CREATE TABLE re_deposits (
 
 CREATE TABLE re_refunds (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   deposit_id UUID REFERENCES re_deposits(id) ON DELETE CASCADE,
   amount NUMERIC NOT NULL,
   refund_date DATE DEFAULT CURRENT_DATE,
@@ -71,11 +77,14 @@ CREATE TABLE re_refunds (
 
 CREATE TABLE re_expense_categories (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
+  name TEXT NOT NULL,
+  UNIQUE(user_id, name)
 );
 
 CREATE TABLE re_expenses (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   category_id UUID REFERENCES re_expense_categories(id),
   amount NUMERIC NOT NULL,
   date DATE DEFAULT CURRENT_DATE,
@@ -86,27 +95,32 @@ CREATE TABLE re_expenses (
 -- 3. Taxi & Hijet Module
 CREATE TABLE th_vehicles (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   type TEXT CHECK (type IN ('taxi', 'hijet')) NOT NULL,
-  car_number TEXT NOT NULL UNIQUE,
+  car_number TEXT NOT NULL,
   name TEXT NOT NULL,
   model TEXT,
   license_expiry DATE,
   status TEXT CHECK (status IN ('active', 'inactive')) DEFAULT 'active',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  UNIQUE(user_id, car_number)
 );
 
 CREATE TABLE th_drivers (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   name TEXT NOT NULL,
-  nrc TEXT NOT NULL UNIQUE,
+  nrc TEXT NOT NULL,
   license_no TEXT NOT NULL,
   address TEXT,
   phone TEXT NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  UNIQUE(user_id, nrc)
 );
 
 CREATE TABLE th_assignments (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   vehicle_id UUID REFERENCES th_vehicles(id) ON DELETE CASCADE,
   driver_id UUID REFERENCES th_drivers(id) ON DELETE CASCADE,
   start_date DATE NOT NULL,
@@ -116,6 +130,7 @@ CREATE TABLE th_assignments (
 
 CREATE TABLE th_fee_payments (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   vehicle_id UUID REFERENCES th_vehicles(id) ON DELETE CASCADE,
   driver_id UUID REFERENCES th_drivers(id) ON DELETE CASCADE,
   amount NUMERIC NOT NULL,
@@ -129,6 +144,7 @@ CREATE TABLE th_fee_payments (
 
 CREATE TABLE th_maintenance (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   vehicle_id UUID REFERENCES th_vehicles(id) ON DELETE CASCADE,
   date DATE DEFAULT CURRENT_DATE,
   type TEXT NOT NULL,
@@ -140,6 +156,7 @@ CREATE TABLE th_maintenance (
 
 CREATE TABLE th_deposits (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   vehicle_id UUID REFERENCES th_vehicles(id) ON DELETE CASCADE,
   driver_id UUID REFERENCES th_drivers(id) ON DELETE CASCADE,
   amount NUMERIC NOT NULL,
@@ -150,6 +167,7 @@ CREATE TABLE th_deposits (
 
 CREATE TABLE th_refunds (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   deposit_id UUID REFERENCES th_deposits(id) ON DELETE CASCADE,
   amount NUMERIC NOT NULL,
   refund_date DATE DEFAULT CURRENT_DATE,
@@ -161,6 +179,7 @@ CREATE TABLE th_refunds (
 -- 4. Reminders (Shared)
 CREATE TABLE reminders (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
   title TEXT NOT NULL,
   description TEXT,
   due_date DATE NOT NULL,
@@ -169,3 +188,6 @@ CREATE TABLE reminders (
   related_id UUID, -- ID of the related contract or vehicle
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
+
+-- Enable RLS and Policies for all tables
+-- (Note: Run the dynamic SQL script provided in the implementation plan to apply this to all existing tables)

@@ -39,6 +39,10 @@ export default function Dashboard() {
   async function fetchStats() {
     setLoading(true);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) return;
+
       const startDate = `${selectedMonth}-01`;
       const endDate = new Date(new Date(selectedMonth + "-01").setMonth(new Date(selectedMonth + "-01").getMonth() + 1)).toISOString().split('T')[0];
 
@@ -52,14 +56,14 @@ export default function Dashboard() {
         { data: reExpenses },
         { data: thMaintenance }
       ] = await Promise.all([
-        supabase.from('re_properties').select('*', { count: 'exact', head: true }),
-        supabase.from('re_tenants').select('*', { count: 'exact', head: true }),
-        supabase.from('th_vehicles').select('*', { count: 'exact', head: true }),
-        supabase.from('th_drivers').select('*', { count: 'exact', head: true }),
-        supabase.from('re_payments').select('amount, payment_date').gte('payment_date', startDate).lt('payment_date', endDate),
-        supabase.from('th_fee_payments').select('amount, payment_date').gte('payment_date', startDate).lt('payment_date', endDate),
-        supabase.from('re_expenses').select('amount, date, re_expense_categories(name)').gte('date', startDate).lt('date', endDate),
-        supabase.from('th_maintenance').select('owner_share, date, type').gte('date', startDate).lt('date', endDate)
+        supabase.from('re_properties').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
+        supabase.from('re_tenants').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
+        supabase.from('th_vehicles').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
+        supabase.from('th_drivers').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
+        supabase.from('re_payments').select('amount, payment_date').eq('user_id', user.id).gte('payment_date', startDate).lt('payment_date', endDate),
+        supabase.from('th_fee_payments').select('amount, payment_date').eq('user_id', user.id).gte('payment_date', startDate).lt('payment_date', endDate),
+        supabase.from('re_expenses').select('amount, date, re_expense_categories(name)').eq('user_id', user.id).gte('date', startDate).lt('date', endDate),
+        supabase.from('th_maintenance').select('owner_share, date, type').eq('user_id', user.id).gte('date', startDate).lt('date', endDate)
       ]);
 
       const reIncome = rePayments?.reduce((sum, p) => sum + p.amount, 0) || 0;

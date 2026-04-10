@@ -7,10 +7,16 @@ import { Button } from '../components/ui/Button';
 
 export default function Reporting() {
   const [loading, setLoading] = useState<string | null>(null);
+  const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1);
+  const [filterYear, setFilterYear] = useState(new Date().getFullYear());
 
   async function exportToExcel(tableName: string, fileName: string) {
     setLoading(tableName);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) return;
+
       let query = supabase.from(tableName);
       let selectQuery = '*';
 
@@ -18,6 +24,8 @@ export default function Reporting() {
         selectQuery = '*, re_properties(name, room_number), re_tenants(name)';
       } else if (tableName === 're_payments') {
         selectQuery = '*, re_contracts(re_tenants(name), re_properties(name, room_number))';
+      } else if (tableName === 're_meter_readings') {
+        selectQuery = '*, re_properties(name, room_number)';
       } else if (tableName === 're_deposits') {
         selectQuery = '*, re_contracts(re_tenants(name), re_properties(name, room_number)), re_refunds(*)';
       } else if (tableName === 're_refunds') {
@@ -32,7 +40,22 @@ export default function Reporting() {
         selectQuery = '*, th_deposits(amount, th_vehicles(name, car_number), th_drivers(name))';
       }
 
-      const { data, error } = await query.select(selectQuery);
+      let dbQuery = query.select(selectQuery).eq('user_id', user.id);
+
+      // Apply monthly filter for periodic tables
+      const periodicTables = ['re_payments', 're_meter_readings', 'th_fee_payments', 'th_maintenance'];
+      if (periodicTables.includes(tableName)) {
+        const startDate = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
+        const lastDay = new Date(filterYear, filterMonth, 0).getDate();
+        const endDate = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${lastDay}`;
+        
+        const dateColumn = tableName === 'th_maintenance' ? 'date' : 'payment_date';
+        const finalDateCol = tableName === 're_meter_readings' ? 'reading_date' : dateColumn;
+        
+        dbQuery = dbQuery.gte(finalDateCol, startDate).lte(finalDateCol, endDate);
+      }
+
+      const { data, error } = await dbQuery;
       if (error) throw error;
 
       let exportData = data || [];
@@ -72,6 +95,19 @@ export default function Reporting() {
             'ပမာဏ': item.amount,
             'ပေးချေသည့်ရက်': item.payment_date,
             'ငွေပေးနည်း': item.method === 'cash' ? 'မင်ဂျင်' : 'ဘဏ်',
+          };
+        } else if (tableName === 're_meter_readings') {
+          return {
+            'အခန်းအမည်': `${item.re_properties?.name || ''} (${item.re_properties?.room_number || ''})`,
+            'ရက်စွဲ': item.reading_date,
+            'ယခုလမီတာ': item.current_reading,
+            'ပြီးခဲ့သည့်လမီတာ': item.previous_reading,
+            'ယူနစ်': item.current_reading - item.previous_reading,
+            'မီတာခ (၅၅၀)': (item.current_reading - item.previous_reading) * item.unit_price,
+            'ဘုံအသုံးစရိတ်': item.common_charge,
+            'ရေဖိုး': item.water_charge,
+            'ဝန်ဆောင်ခ': item.service_charge,
+            'စုစုပေါင်း ကျသင့်ငွေ': item.total_amount,
           };
         } else if (tableName === 'th_vehicles') {
           return {
@@ -126,13 +162,24 @@ export default function Reporting() {
     const key = `${type}_combined_deposits`;
     setLoading(key);
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) return;
+
       let data: any[] = [];
       let error: any = null;
+
+      const startDate = `${filterYear}-${String(filterMonth).padStart(2, '0')}-01`;
+      const lastDay = new Date(filterYear, filterMonth, 0).getDate();
+      const endDate = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${lastDay}`;
 
       if (type === 're') {
         const result = await supabase
           .from('re_deposits')
           .select('*, re_contracts(re_tenants(name), re_properties(name, room_number)), re_refunds(*)')
+          .eq('user_id', user.id)
+          .gte('payment_date', startDate)
+          .lte('payment_date', endDate)
           .order('payment_date', { ascending: false });
         data = result.data || [];
         error = result.error;
@@ -140,6 +187,9 @@ export default function Reporting() {
         const result = await supabase
           .from('th_deposits')
           .select('*, th_vehicles(name, car_number), th_drivers(name), th_refunds(*)')
+          .eq('user_id', user.id)
+          .gte('payment_date', startDate)
+          .lte('payment_date', endDate)
           .order('payment_date', { ascending: false });
         data = result.data || [];
         error = result.error;
@@ -188,8 +238,9 @@ export default function Reporting() {
       items: [
         { label: 'အခန်းများစာရင်း', table: 're_properties', icon: Building2 },
         { label: 'အိမ်ငှားများစာရင်း', table: 're_tenants', icon: Users },
-        { label: 'စာချုပ်များစာရင်း', table: 're_contracts', icon: CreditCard },
+        { label: 'စာချုပ်များစာရင်း', table: 're_contracts', icon: FileDown },
         { label: 'ငွေပေးချေမှုမှတ်တမ်း', table: 're_payments', icon: CreditCard },
+        { label: 'မီတာခနှင့် အထွေထွေအသုံးစရိတ်', table: 're_meter_readings', icon: CreditCard },
         { label: 'စပေါ်ငွေနှင့် ပြန်အမ်းငွေမှတ်တမ်း', table: 're_combined', icon: CreditCard },
       ]
     },
@@ -207,9 +258,34 @@ export default function Reporting() {
 
   return (
     <div className="space-y-8">
-      <header>
-        <h1 className="text-2xl font-bold text-slate-900">{BURMESE_LABELS.sidebar.reports}</h1>
-        <p className="text-slate-500">Excel ဖိုင်များအဖြစ် ထုတ်ယူနိုင်ပါသည်</p>
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">{BURMESE_LABELS.sidebar.reports}</h1>
+          <p className="text-slate-500">Excel ဖိုင်များအဖြစ် ထုတ်ယူနိုင်ပါသည်</p>
+        </div>
+        
+        <div className="flex items-center gap-2 bg-white px-3 py-2 border rounded-xl shadow-sm">
+          <select 
+            value={filterMonth} 
+            onChange={(e) => setFilterMonth(Number(e.target.value))}
+            className="outline-none bg-transparent text-sm font-bold text-slate-700"
+          >
+            {[...Array(12)].map((_, i) => (
+              <option key={i + 1} value={i + 1}>
+                {new Intl.DateTimeFormat('my-MM', { month: 'long' }).format(new Date(2000, i))}
+              </option>
+            ))}
+          </select>
+          <select 
+            value={filterYear} 
+            onChange={(e) => setFilterYear(Number(e.target.value))}
+            className="outline-none bg-transparent text-sm font-bold text-slate-700 border-l pl-2"
+          >
+            {[2024, 2025, 2026, 2027, 2028].map(y => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

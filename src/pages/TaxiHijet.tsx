@@ -8,6 +8,7 @@ import {
   CreditCard, 
   Wrench,
   Edit,
+  Trash2,
   Eye
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -37,26 +38,58 @@ export default function TaxiHijet() {
     }
   }, [activeTab]);
 
+  async function handleDeleteItem(table: string, id: string) {
+    if (!confirm('ဤအချက်အလက်ကို ဖျက်ပစ်ရန် သေချာပါသလား?')) return;
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+
+      const { error } = await supabase
+        .from(table)
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+      
+      if (error) throw error;
+      fetchData();
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    }
+  }
+
   async function fetchDropdownData() {
-    const { data: vehs } = await supabase.from('th_vehicles').select('id, car_number, type').eq('status', 'active');
-    const { data: drivs } = await supabase.from('th_drivers').select('id, name');
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) return;
+
+    const { data: vehs } = await supabase.from('th_vehicles').select('id, car_number, type').eq('user_id', user.id).eq('status', 'active');
+    const { data: drivs } = await supabase.from('th_drivers').select('id, name').eq('user_id', user.id);
     setVehicles(vehs || []);
     setDrivers(drivs || []);
   }
 
   async function fetchData() {
     setLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
     let query;
     if (activeTab === 'vehicles') {
-      query = supabase.from('th_vehicles').select('*').order('car_number');
+      query = supabase.from('th_vehicles').select('*').eq('user_id', user.id).order('car_number');
     } else if (activeTab === 'drivers') {
-      query = supabase.from('th_drivers').select('*').order('name');
+      query = supabase.from('th_drivers').select('*').eq('user_id', user.id).order('name');
     } else if (activeTab === 'fees') {
-      query = supabase.from('th_fee_payments').select('*, th_vehicles(car_number), th_drivers(name)').order('payment_date', { ascending: false });
+      query = supabase.from('th_fee_payments').select('*, th_vehicles(car_number), th_drivers(name)').eq('user_id', user.id).order('payment_date', { ascending: false });
     } else if (activeTab === 'maintenance') {
-      query = supabase.from('th_maintenance').select('*, th_vehicles(car_number)').order('date', { ascending: false });
+      query = supabase.from('th_maintenance').select('*, th_vehicles(car_number)').eq('user_id', user.id).order('date', { ascending: false });
     } else if (activeTab === 'deposits') {
-      query = supabase.from('th_deposits').select('*, th_vehicles(car_number), th_drivers(name), th_refunds(*)').order('payment_date', { ascending: false });
+      query = supabase.from('th_deposits').select('*, th_vehicles(car_number), th_drivers(name), th_refunds(*)').eq('user_id', user.id).order('payment_date', { ascending: false });
     }
 
     if (query) {
@@ -71,51 +104,67 @@ export default function TaxiHijet() {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const newVehicle = {
-      type: formData.get('type'),
-      car_number: formData.get('car_number'),
-      name: formData.get('name'),
-      model: formData.get('model'),
-      license_expiry: formData.get('license_expiry') || null,
-      status: editingItem ? editingItem.status : 'active',
-    };
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+      const newVehicle = {
+        type: formData.get('type'),
+        car_number: formData.get('car_number'),
+        name: formData.get('name'),
+        model: formData.get('model'),
+        license_expiry: formData.get('license_expiry') || null,
+        status: editingItem ? editingItem.status : 'active',
+        user_id: user.id
+      };
 
-    const { error } = editingItem 
+      const { error } = editingItem 
       ? await supabase.from('th_vehicles').update(newVehicle).eq('id', editingItem.id)
       : await supabase.from('th_vehicles').insert([newVehicle]);
 
-    if (error) alert('Error: ' + error.message);
-    else {
+      if (error) throw error;
       setIsModalOpen(false);
       setEditingItem(null);
       fetchData();
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   }
 
   async function handleAddDriver(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const newDriver = {
-      name: formData.get('name'),
-      nrc: formData.get('nrc'),
-      license_no: formData.get('license_no'),
-      phone: formData.get('phone'),
-      address: formData.get('address'),
-    };
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+      const newDriver = {
+        name: formData.get('name'),
+        nrc: formData.get('nrc'),
+        license_no: formData.get('license_no'),
+        phone: formData.get('phone'),
+        address: formData.get('address'),
+        user_id: user.id
+      };
 
-    const { error } = editingItem
+      const { error } = editingItem
       ? await supabase.from('th_drivers').update(newDriver).eq('id', editingItem.id)
       : await supabase.from('th_drivers').insert([newDriver]);
 
-    if (error) alert('Error: ' + error.message);
-    else {
+      if (error) throw error;
       setIsModalOpen(false);
       setEditingItem(null);
       fetchData();
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   }
 
   async function handleAddFee(e: React.FormEvent<HTMLFormElement>) {
@@ -126,6 +175,10 @@ export default function TaxiHijet() {
     let screenshotUrl = null;
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+
       if (screenshotFile && screenshotFile.size > 0) {
         const fileName = `${Date.now()}_${screenshotFile.name}`;
         screenshotUrl = await uploadFile('screenshots', `fees/${fileName}`, screenshotFile);
@@ -140,6 +193,7 @@ export default function TaxiHijet() {
         cycle_end: formData.get('cycle_end'),
         status: editingItem ? editingItem.status : 'paid',
         screenshot_url: screenshotUrl || (editingItem ? editingItem.screenshot_url : null),
+        user_id: user.id
       };
 
       const { error } = editingItem
@@ -162,45 +216,58 @@ export default function TaxiHijet() {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const totalCost = Number(formData.get('total_cost'));
-    const ownerShare = Number(formData.get('owner_share'));
-    const driverShare = totalCost - ownerShare;
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+      const totalCost = Number(formData.get('total_cost'));
+      const ownerShare = Number(formData.get('owner_share'));
+      const driverShare = totalCost - ownerShare;
 
-    const newMaintenance = {
-      vehicle_id: formData.get('vehicle_id'),
-      date: formData.get('date'),
-      type: formData.get('type'),
-      total_cost: totalCost,
-      owner_share: ownerShare,
-      driver_share: driverShare,
-    };
+      const newMaintenance = {
+        vehicle_id: formData.get('vehicle_id'),
+        date: formData.get('date'),
+        type: formData.get('type'),
+        total_cost: totalCost,
+        owner_share: ownerShare,
+        driver_share: driverShare,
+        user_id: user.id
+      };
 
-    const { error } = editingItem
-      ? await supabase.from('th_maintenance').update(newMaintenance).eq('id', editingItem.id)
-      : await supabase.from('th_maintenance').insert([newMaintenance]);
+      const { error } = editingItem
+        ? await supabase.from('th_maintenance').update(newMaintenance).eq('id', editingItem.id)
+        : await supabase.from('th_maintenance').insert([newMaintenance]);
 
-    if (error) alert('Error: ' + error.message);
-    else {
+      if (error) throw error;
       setIsModalOpen(false);
       setEditingItem(null);
       fetchData();
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   }
 
   async function handleAddDeposit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const newDeposit = {
-      vehicle_id: formData.get('vehicle_id'),
-      driver_id: formData.get('driver_id'),
-      amount: Number(formData.get('amount')),
-      payment_date: formData.get('payment_date'),
-      status: editingItem ? editingItem.status : 'held',
-    };
-
+    
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+      const newDeposit = {
+        vehicle_id: formData.get('vehicle_id'),
+        driver_id: formData.get('driver_id'),
+        amount: Number(formData.get('amount')),
+        payment_date: formData.get('payment_date'),
+        status: editingItem ? editingItem.status : 'held',
+        user_id: user.id
+      };
+
       if (editingItem) {
         const { error } = await supabase.from('th_deposits').update(newDeposit).eq('id', editingItem.id);
         if (error) throw error;
@@ -226,6 +293,10 @@ export default function TaxiHijet() {
     let screenshotUrl = null;
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+
       if (screenshotFile && screenshotFile.size > 0) {
         const fileName = `${Date.now()}_${screenshotFile.name}`;
         screenshotUrl = await uploadFile('screenshots', `refunds/${fileName}`, screenshotFile);
@@ -238,6 +309,7 @@ export default function TaxiHijet() {
         refund_date: formData.get('refund_date'),
         reason: formData.get('reason'),
         screenshot_url: screenshotUrl || (editingRefund ? editingRefund.screenshot_url : null),
+        user_id: user.id
       };
 
       if (editingRefund) {
@@ -509,6 +581,22 @@ export default function TaxiHijet() {
                         }}
                       >
                         <Edit size={18} />
+                      </button>
+                      <button 
+                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
+                        onClick={() => {
+                          const tableMap: Record<string, string> = {
+                            vehicles: 'th_vehicles',
+                            drivers: 'th_drivers',
+                            fees: 'th_fee_payments',
+                            maintenance: 'th_maintenance',
+                            deposits: 'th_deposits'
+                          };
+                          handleDeleteItem(tableMap[activeTab], item.id);
+                        }}
+                        title="ဖျက်မည်"
+                      >
+                        <Trash2 size={18} />
                       </button>
                     </div>
                   </td>

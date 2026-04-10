@@ -17,9 +17,17 @@ export default function Reminders() {
 
   async function fetchReminders() {
     setLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
     const { data, error } = await supabase
       .from('reminders')
       .select('*')
+      .eq('user_id', user.id)
       .order('status', { ascending: false }) // pending first
       .order('due_date', { ascending: true });
     
@@ -35,21 +43,32 @@ export default function Reminders() {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
-    const newReminder = {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) {
+        throw new Error('ကျေးဇူးပြု၍ ပြန်လည် Log in ဝင်ပေးပါ။');
+      }
+
+      const newReminder = {
       title: formData.get('title'),
       description: formData.get('description'),
       due_date: formData.get('due_date'),
       type: formData.get('type'),
       status: 'pending',
+      user_id: user.id
     };
 
-    const { error } = await supabase.from('reminders').insert([newReminder]);
-    if (error) alert('Error adding reminder: ' + error.message);
-    else {
+      const { error } = await supabase.from('reminders').insert([newReminder]);
+      if (error) throw error;
+      
       setIsModalOpen(false);
       fetchReminders();
+    } catch (error: any) {
+      alert('Error: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   }
 
   async function toggleStatus(id: string, currentStatus: string) {
