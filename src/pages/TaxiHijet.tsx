@@ -83,13 +83,13 @@ export default function TaxiHijet() {
     if (activeTab === 'vehicles') {
       query = supabase.from('th_vehicles').select('*').eq('user_id', user.id).order('car_number');
     } else if (activeTab === 'drivers') {
-      query = supabase.from('th_drivers').select('*').eq('user_id', user.id).order('name');
+      query = supabase.from('th_drivers').select('*').eq('user_id', user.id).order('name').order('created_at', { ascending: true });
     } else if (activeTab === 'fees') {
-      query = supabase.from('th_fee_payments').select('*, th_vehicles(car_number), th_drivers(name)').eq('user_id', user.id).order('payment_date', { ascending: false });
+      query = supabase.from('th_fee_payments').select('*, th_vehicles(car_number), th_drivers(name)').eq('user_id', user.id).order('payment_date', { ascending: false }).order('created_at', { ascending: false });
     } else if (activeTab === 'maintenance') {
-      query = supabase.from('th_maintenance').select('*, th_vehicles(car_number)').eq('user_id', user.id).order('date', { ascending: false });
+      query = supabase.from('th_maintenance').select('*, th_vehicles(car_number)').eq('user_id', user.id).order('date', { ascending: false }).order('created_at', { ascending: false });
     } else if (activeTab === 'deposits') {
-      query = supabase.from('th_deposits').select('*, th_vehicles(car_number), th_drivers(name), th_refunds(*)').eq('user_id', user.id).order('payment_date', { ascending: false });
+      query = supabase.from('th_deposits').select('*, th_vehicles(car_number), th_drivers(name), th_refunds(*)').eq('user_id', user.id).order('payment_date', { ascending: false }).order('created_at', { ascending: false });
     }
 
     if (query) {
@@ -360,22 +360,24 @@ export default function TaxiHijet() {
         </Button>
       </header>
 
-      <div className="flex border-b border-slate-200">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={cn(
-              "flex items-center gap-2 px-6 py-3 font-medium transition-colors border-b-2",
-              activeTab === tab.id 
-                ? "border-blue-600 text-blue-600" 
-                : "border-transparent text-slate-500 hover:text-slate-700"
-            )}
-          >
-            <tab.icon size={18} />
-            {tab.label}
-          </button>
-        ))}
+      <div className="flex border-b border-slate-200 overflow-x-auto no-scrollbar">
+        <div className="flex min-w-max">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={cn(
+                "flex items-center gap-2 px-4 lg:px-6 py-3 font-medium transition-colors border-b-2 whitespace-nowrap",
+                activeTab === tab.id 
+                  ? "border-blue-600 text-blue-600" 
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <tab.icon size={18} />
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
@@ -398,7 +400,8 @@ export default function TaxiHijet() {
             {BURMESE_LABELS.common.noData}
           </div>
         ) : (
-          <table className="w-full text-left">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[800px] lg:min-w-0">
             <thead className="bg-slate-50 text-slate-500 text-sm uppercase">
               {activeTab === 'vehicles' && (
                 <tr>
@@ -604,6 +607,7 @@ export default function TaxiHijet() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

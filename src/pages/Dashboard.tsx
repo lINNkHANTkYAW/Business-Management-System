@@ -135,11 +135,11 @@ export default function Dashboard() {
       </header>
 
       {/* Top Stats Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
         {topStats.map((card, index) => (
-          <div key={index} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div key={index} className="bg-white p-4 lg:p-6 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex items-center gap-4">
-              <div className={`${card.bg} ${card.color} p-3 rounded-xl`}>
+              <div className={`${card.bg} ${card.color} p-2.5 lg:p-3 rounded-xl`}>
                 <card.icon size={24} />
               </div>
               <div>
@@ -206,7 +206,7 @@ export default function Dashboard() {
           const profit = stats.income - stats.expense;
           const isProfit = profit >= 0;
           return (
-            <div className={`p-8 rounded-2xl border shadow-sm relative overflow-hidden ${
+            <div className={`p-6 sm:p-8 rounded-2xl border shadow-sm relative overflow-hidden ${
               isProfit ? 'bg-blue-50 border-blue-200' : 'bg-rose-50 border-rose-200'
             }`}>
               <div className="absolute top-0 right-0 p-4 opacity-10">

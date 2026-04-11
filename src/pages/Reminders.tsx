@@ -29,7 +29,8 @@ export default function Reminders() {
       .select('*')
       .eq('user_id', user.id)
       .order('status', { ascending: false }) // pending first
-      .order('due_date', { ascending: true });
+      .order('due_date', { ascending: true })
+      .order('created_at', { ascending: true });
     
     if (error) {
       console.error('Error fetching reminders:', error);
@@ -132,11 +133,11 @@ export default function Reminders() {
             <div 
               key={reminder.id} 
               className={cn(
-                "bg-white p-4 rounded-xl shadow-sm border transition-all flex items-center justify-between",
+                "bg-white p-4 rounded-xl shadow-sm border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4",
                 reminder.status === 'dismissed' ? "border-slate-100 opacity-60" : "border-blue-100 bg-blue-50/30"
               )}
             >
-              <div className="flex items-center gap-4">
+              <div className="flex items-start sm:items-center gap-4">
                 <button 
                   onClick={() => toggleStatus(reminder.id, reminder.status)}
                   className={cn(

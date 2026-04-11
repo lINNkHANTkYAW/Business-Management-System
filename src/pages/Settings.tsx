@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Lock, Mail, Shield, Save, LogOut } from 'lucide-react';
+import { User, Lock, Mail, Shield, Save, LogOut, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { BURMESE_LABELS, cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
@@ -12,6 +12,8 @@ export default function Settings() {
     newPassword: '',
     confirmPassword: ''
   });
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
     fetchProfile();
@@ -35,21 +37,32 @@ export default function Settings() {
 
   async function handleUpdateProfile(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const form = e.currentTarget;
     setIsSubmitting(true);
-    const formData = new FormData(e.currentTarget);
-    const fullName = formData.get('full_name') as string;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not found');
 
-    const { error } = await supabase
-      .from('profiles')
-      .update({ full_name: fullName })
-      .eq('id', profile.id);
+      const formData = new FormData(form);
+      const fullName = formData.get('full_name') as string;
 
-    if (error) alert('Error updating profile: ' + error.message);
-    else {
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({ 
+          id: user.id,
+          full_name: fullName 
+        });
+
+      if (error) throw error;
+      
       alert('ကိုယ်ရေးအချက်အလက်များကို သိမ်းဆည်းပြီးပါပြီ။');
       fetchProfile();
+    } catch (error: any) {
+      console.error('Error updating profile:', error);
+      alert('Error updating profile: ' + error.message);
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   }
 
   async function handleChangePassword(e: React.FormEvent<HTMLFormElement>) {
@@ -90,8 +103,11 @@ export default function Settings() {
             </div>
             <h3 className="font-bold text-lg text-slate-900">{profile?.full_name || 'အမည်မရှိ'}</h3>
             <p className="text-sm text-slate-500 mb-4">{profile?.email}</p>
-            <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold uppercase tracking-wider">
-              {profile?.role === 'admin' ? 'Administrator' : 'Staff'}
+            <span className={cn(
+              "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
+              profile?.role === 'admin' ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"
+            )}>
+              {profile?.role === 'admin' ? 'Administrator' : profile?.role === 'staff' ? 'Staff' : 'New User'}
             </span>
           </div>
 
@@ -144,25 +160,43 @@ export default function Settings() {
             <form onSubmit={handleChangePassword} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">စကားဝှက်အသစ်</label>
-                <input 
-                  type="password" 
-                  value={passwordData.newPassword}
-                  onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                  required 
-                  minLength={6}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none" 
-                />
+                <div className="relative">
+                  <input 
+                    type={showNewPassword ? "text" : "password"} 
+                    value={passwordData.newPassword}
+                    onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                    required 
+                    minLength={6}
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none pr-10" 
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    {showNewPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">စကားဝှက်အသစ်ကို ထပ်မံရိုက်ထည့်ပါ</label>
-                <input 
-                  type="password" 
-                  value={passwordData.confirmPassword}
-                  onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-                  required 
-                  minLength={6}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none" 
-                />
+                <div className="relative">
+                  <input 
+                    type={showConfirmPassword ? "text" : "password"} 
+                    value={passwordData.confirmPassword}
+                    onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                    required 
+                    minLength={6}
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 outline-none pr-10" 
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
               </div>
               <Button type="submit" variant="secondary" loading={isSubmitting} icon={<Shield size={18} />}>
                 စကားဝှက်အသစ်လဲမည်

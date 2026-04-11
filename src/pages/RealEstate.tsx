@@ -80,9 +80,9 @@ export default function RealEstate() {
     const user = session?.user;
     if (!user) return;
 
-    const { data: props } = await supabase.from('re_properties').select('id, name, room_number, status, deposit_amount').eq('user_id', user.id);
-    const { data: tens } = await supabase.from('re_tenants').select('id, name').eq('user_id', user.id);
-    const { data: conts } = await supabase.from('re_contracts').select('id, re_properties(name, room_number), re_tenants(name)').eq('user_id', user.id).eq('status', 'active');
+    const { data: props } = await supabase.from('re_properties').select('id, name, room_number, status, deposit_amount').eq('user_id', user.id).order('room_number');
+    const { data: tens } = await supabase.from('re_tenants').select('id, name').eq('user_id', user.id).order('name');
+    const { data: conts } = await supabase.from('re_contracts').select('id, re_properties(name, room_number), re_tenants(name)').eq('user_id', user.id).eq('status', 'active').order('created_at', { ascending: false });
     setProperties(props || []);
     setTenants(tens || []);
     setContracts(conts || []);
@@ -99,13 +99,13 @@ export default function RealEstate() {
 
     let query;
     if (activeTab === 'properties') {
-      query = supabase.from('re_properties').select('*').eq('user_id', user.id).order('name');
+      query = supabase.from('re_properties').select('*').eq('user_id', user.id).order('room_number');
     } else if (activeTab === 'tenants') {
-      query = supabase.from('re_tenants').select('*').eq('user_id', user.id).order('name');
+      query = supabase.from('re_tenants').select('*').eq('user_id', user.id).order('name').order('created_at', { ascending: true });
     } else if (activeTab === 'contracts') {
       query = supabase.from('re_contracts').select('*, re_properties(name, room_number), re_tenants(name)').eq('user_id', user.id).order('created_at', { ascending: false });
     } else if (activeTab === 'payments') {
-      query = supabase.from('re_payments').select('*, re_contracts(*, re_properties(name, room_number), re_tenants(name))').eq('user_id', user.id).order('payment_date', { ascending: false });
+      query = supabase.from('re_payments').select('*, re_contracts(*, re_properties(name, room_number), re_tenants(name))').eq('user_id', user.id).order('payment_date', { ascending: false }).order('created_at', { ascending: false });
     } else if (activeTab === 'deposits') {
       query = supabase.from('re_deposits').select('*, re_contracts(*, re_properties(name, room_number), re_tenants(name)), re_refunds(*)').eq('user_id', user.id).order('created_at', { ascending: false });
     } else if (activeTab === 'meter-readings') {
@@ -113,7 +113,7 @@ export default function RealEstate() {
       const lastDay = new Date(filterYear, filterMonth, 0).getDate();
       const endDate = `${filterYear}-${String(filterMonth).padStart(2, '0')}-${lastDay}`;
       
-      const { data: props } = await supabase.from('re_properties').select('*').eq('user_id', user.id).order('name');
+      const { data: props } = await supabase.from('re_properties').select('*').eq('user_id', user.id).order('room_number');
       const { data: readings } = await supabase.from('re_meter_readings').select('*')
         .eq('user_id', user.id)
         .gte('reading_date', startDate)
@@ -597,26 +597,28 @@ export default function RealEstate() {
         </div>
       )}
 
-      <div className="flex border-b border-slate-200">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={cn(
-               "flex items-center gap-2 px-6 py-3 font-medium transition-colors border-b-2",
-              activeTab === tab.id 
-                ? "border-blue-600 text-blue-600" 
-                : "border-transparent text-slate-500 hover:text-slate-700"
-            )}
-          >
-            <tab.icon size={18} />
-            {tab.label}
-          </button>
-        ))}
+      <div className="flex border-b border-slate-200 overflow-x-auto no-scrollbar">
+        <div className="flex min-w-max">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={cn(
+                "flex items-center gap-2 px-4 lg:px-6 py-3 font-medium transition-colors border-b-2 whitespace-nowrap",
+                activeTab === tab.id 
+                  ? "border-blue-600 text-blue-600" 
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <tab.icon size={18} />
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="p-4 border-b border-slate-100 flex gap-4">
+        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row gap-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
@@ -625,6 +627,29 @@ export default function RealEstate() {
               className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
             />
           </div>
+          {activeTab === 'meter-readings' && (
+            <div className="flex gap-2">
+              <select 
+                value={filterMonth}
+                onChange={(e) => setFilterMonth(Number(e.target.value))}
+                className="px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 bg-white"
+              >
+                {Array.from({ length: 12 }, (_, i) => (
+                  <option key={i + 1} value={i + 1}>{i + 1} လ</option>
+                ))}
+              </select>
+              <select 
+                value={filterYear}
+                onChange={(e) => setFilterYear(Number(e.target.value))}
+                className="px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 bg-white"
+              >
+                {Array.from({ length: 5 }, (_, i) => {
+                  const year = new Date().getFullYear() - 2 + i;
+                  return <option key={year} value={year}>{year} ခုနှစ်</option>;
+                })}
+              </select>
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -635,7 +660,8 @@ export default function RealEstate() {
             {BURMESE_LABELS.common.noData}
           </div>
         ) : (
-          <table className="w-full text-left">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[800px] lg:min-w-0">
             <thead className="bg-slate-50 text-slate-500 text-sm uppercase">
               {activeTab === 'properties' && (
                 <tr>
@@ -995,6 +1021,7 @@ export default function RealEstate() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
